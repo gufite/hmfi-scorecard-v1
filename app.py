@@ -77,7 +77,7 @@ CUSTOMER_INPUT_DEFAULTS = {
     "market_value": "150000",
 }
 
-CUSTOMER_DEFAULTS_VERSION = 3
+CUSTOMER_DEFAULTS_VERSION = 4
 
 RISK_BANDS = [
     (85, "Very Low Risk"),
@@ -95,11 +95,16 @@ def init_state() -> None:
         st.session_state.sector_stress = DEFAULT_SECTOR_STRESS.copy()
     if st.session_state.get("customer_defaults_version", 0) < CUSTOMER_DEFAULTS_VERSION:
         for key, value in CUSTOMER_INPUT_DEFAULTS.items():
-            if key not in st.session_state or st.session_state.get(key, "") in ["", None]:
-                st.session_state[key] = value
-        if "application_date" not in st.session_state or st.session_state.get("application_date") is None:
-            st.session_state.application_date = date.today()
+            st.session_state[key] = value
+        st.session_state.application_date = date.today()
         st.session_state.customer_defaults_version = CUSTOMER_DEFAULTS_VERSION
+
+
+def reset_customer_defaults():
+    for key, value in CUSTOMER_INPUT_DEFAULTS.items():
+        st.session_state[key] = value
+    st.session_state.application_date = date.today()
+    st.session_state.scorecard_step = 1
 
 
 def parse_optional_float(raw_value: str):
@@ -504,9 +509,9 @@ def calculate_scorecard(inputs, lookups, sector_stress):
     elif total_score <= 54:
         recommendation = "REJECT"
     elif flags["Branch_Limit_Flag"] or flags["LTV_Flag"] or flags["Collateral_Flag"]:
-        recommendation = "REFER - HEAD OFFICE"
+        recommendation = "REFER – HEAD OFFICE"
     elif total_score <= 69 or flags["Equity_Flag"] or flags["Training_Flag"]:
-        recommendation = "APPROVE WITH CONDITIONS - BRANCH MANAGER"
+        recommendation = "APPROVE WITH CONDITIONS – BRANCH MANAGER"
     else:
         recommendation = "APPROVE"
 
@@ -752,12 +757,17 @@ def step_missing_fields(step: int):
         num_checks = [
             ("age_years", "Age (years)"),
             ("requested_loan_amount", "Requested Loan Amount"),
-            ("term_months", "Term (months)"),
-            ("annual_interest_rate", "Annual Interest Rate"),
         ]
         for key, label in num_checks:
             if not is_number_filled(key):
                 missing.append(label)
+        has_installment_override = is_number_filled("monthly_installment_override")
+        has_term = is_number_filled("term_months")
+        has_rate = is_number_filled("annual_interest_rate")
+        if not has_installment_override and not (has_term and has_rate):
+            missing.append(
+                "Monthly Installment override OR both Term (months) and Annual Interest Rate"
+            )
     elif step == 2:
         checks = [
             ("business_name", "Business Name"),
@@ -912,6 +922,14 @@ def show_scorecard():
 
     if "scorecard_step" not in st.session_state:
         st.session_state.scorecard_step = 1
+
+    top_left, top_right = st.columns([0.7, 0.3])
+    with top_right:
+        if st.button("Reset Form Defaults"):
+            reset_customer_defaults()
+            if "last_result" in st.session_state:
+                del st.session_state["last_result"]
+            st.rerun()
 
     steps = {
         1: "Applicant & Loan Request",
